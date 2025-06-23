@@ -5,7 +5,6 @@ import pytz
 from datetime import datetime, time, timedelta
 import os
 from polygon import RESTClient
-from google.colab import userdata
 import io
 
 # Include the necessary functions directly
@@ -554,7 +553,7 @@ def analyze():
     global all_tickers_gap_up_results
     all_tickers_gap_up_results[ticker] = gap_up_results_df
 
-    return render_template('results.html', ticker=ticker, results=gap_up_results_df.to_html(classes='table table-striped', index=False))
+    return render_template('results_multiple.html', ticker=ticker, results=gap_up_results_df.to_html(classes='table table-striped', index=False))
 
 @app.route('/download/<ticker>')
 def download_excel(ticker):
