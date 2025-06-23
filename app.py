@@ -1,19 +1,14 @@
-# main.py
+# app.py (Full content with download route)
+from flask import Flask, request, render_template, send_file
 import pandas as pd
-from polygon import RESTClient
-from google.colab import userdata
 import pytz
 from datetime import datetime, time, timedelta
 import os
+from polygon import RESTClient
+from google.colab import userdata
+import io
 
-# Assume the functions get_premarket_volume, count_vwap_crosses,
-# get_daily_high_low_data, get_premarket_high_low_data, get_gap_up_day_stats,
-# fetch_intraday_1_min, analyze_intraday_first_30_mins, and categorize_fade
-# are defined and available in this file or imported from a local module.
-# For the purpose of this subtask, we will include them directly.
-
-# Include the necessary functions from the previous cells
-# Function from cell eh6YT66sH_wv
+# Include the necessary functions directly
 def count_vwap_crosses(polygon_client, ticker, date):
     """
     Fetches 2-minute bar data for a given ticker and date and counts VWAP crosses.
@@ -66,7 +61,6 @@ def count_vwap_crosses(polygon_client, ticker, date):
 
     return cross_count
 
-# Function from cell ufoXkAbwkiYd
 def get_premarket_high_low_data(ticker, polygon_client, date_str):
     """
     Fetches the daily high price, low price, and their timestamps for a given ticker and date
@@ -146,7 +140,6 @@ def get_premarket_high_low_data(ticker, polygon_client, date_str):
         print(f"Error fetching data for {ticker} on {date_str} between 4:00 AM and 9:30 AM EST: {e}")
         return None, None, None, None
 
-# Function from cell YUcPE711XpGF
 def get_daily_high_low_data(ticker, polygon_client, date_str):
     """
     Fetches the daily high price, low price, and their timestamps for a given ticker and date
@@ -226,7 +219,53 @@ def get_daily_high_low_data(ticker, polygon_client, date_str):
         print(f"Error fetching data for {ticker} on {date_str} between 9:30 AM and 4:00 PM EST: {e}")
         return None, None, None, None
 
-# Function from cell 3wnCO81kIGPf
+def get_premarket_volume(polygon_client, ticker, date_str):
+    """
+    Fetches the total volume for a given ticker and date during the pre-market hours (4:00 AM to 9:30 AM EST).
+
+    Args:
+        polygon_client: The initialized Polygon.io RESTClient.
+        ticker (str): The stock ticker symbol.
+        date_str (str): The date in 'YYYY-MM-DD' format.
+
+    Returns:
+        float: The total pre-market volume, or 0.0 if no data is available or an error occurs.
+    """
+    try:
+        est_timezone = pytz.timezone('America/New_York')
+
+        # Define the start and end times in EST for the pre-market session
+        start_datetime_est = est_timezone.localize(datetime.strptime(f"{date_str} 04:00", '%Y-%m-%d %H:%M'))
+        end_datetime_est = est_timezone.localize(datetime.strptime(f"{date_str} 09:30", '%Y-%m-%d %H:%M'))
+
+        # Convert EST datetimes to UTC timestamps (in milliseconds) for the API call
+        start_timestamp_utc_ms = int(start_datetime_est.timestamp() * 1000)
+        end_timestamp_utc_ms = int(end_datetime_est.timestamp() * 1000)
+
+        # Fetch 1-minute bar data for the specified pre-market range
+        aggs_data = polygon_client.list_aggs(
+            ticker=ticker,
+            multiplier=1,
+            timespan='minute',
+            from_=start_timestamp_utc_ms,
+            to=end_timestamp_utc_ms,
+            limit=50000  # Increased limit to get all bars for the specified range
+        )
+        aggs_list = list(aggs_data)
+
+        if not aggs_list:
+            #print(f"No pre-market data available for {ticker} on {date_str}")
+            return 0.0
+
+        # Calculate the total volume in the pre-market period
+        premarket_total_volume = sum(bar.volume for bar in aggs_list)
+
+        return premarket_total_volume
+
+    except Exception as e:
+        print(f"Error fetching pre-market data for {ticker} on {date_str}: {e}")
+        return 0.0 # Return 0.0 on error
+
 def get_gap_up_day_stats(ticker, polygon_client):
     """
     Analyzes historical data for a given ticker to identify significant gap-ups.
@@ -339,7 +378,7 @@ def get_gap_up_day_stats(ticker, polygon_client):
     #print (gap_up_days)
     return gap_up_days
 
-# Function from cell _OPRNwTkIT-n
+
 def fetch_intraday_1_min(polygon_client, ticker, date_str):
     """
     Fetches intraday 1-minute bar data for a given ticker and date for the first 30 minutes.
@@ -436,7 +475,7 @@ def analyze_intraday_first_30_mins(intraday_aggs_list, daily_high):
 
     return max_price_30min, max_price_30min_timestamp, high_within_30min, volume_30min # Return volume_30min
 
-# Function from cell 7KCm6QrIYpJ
+
 def categorize_fade(runner_fader, high_within_30min, percent_high_from_open_30min):
     """
     Categorizes a 'Fader' day based on intraday price action.
@@ -464,159 +503,74 @@ def categorize_fade(runner_fader, high_within_30min, percent_high_from_open_30mi
             fade_category = "Straight Down Fade"
     return fade_category
 
-# Function from cell 172c111b
-def get_premarket_volume(polygon_client, ticker, date_str):
-    """
-    Fetches 1-minute bar data for the pre-market hours (4:00 AM to 9:30 AM EST)
-    and calculates the total volume.
 
-    Args:
-        polygon_client: The initialized Polygon.io RESTClient.
-        ticker (str): The stock ticker symbol.
-        date_str (str): The date in 'YYYY-MM-DD' format.
+# Initialize the Flask application
+app = Flask(__name__)
 
-    Returns:
-        float: The total volume during pre-market hours, or 0 if no data or an error occurs.
-    """
-    try:
-        est_timezone = pytz.timezone('America/New_York')
+# Initialize the Polygon client (assuming POLYGON_API_KEY is already in userdata)
+try:
+    polygon_client = RESTClient(userdata.get("POLYGON_API_KEY"))
+except Exception as e:
+    print(f"Error initializing Polygon client: {e}")
+    polygon_client = None # Handle the case where the client cannot be initialized
 
-        # Define the start and end times in EST for pre-market hours
-        start_datetime_est = est_timezone.localize(datetime.strptime(f"{date_str} 04:00", '%Y-%m-%d %H:%M'))
-        end_datetime_est = est_timezone.localize(datetime.strptime(f"{date_str} 09:30", '%Y-%m-%d %H:%M'))
+# Dictionary to store results for potential download
+all_tickers_gap_up_results = {}
 
-        # Convert EST datetimes to UTC timestamps (in milliseconds) for the API call
-        start_timestamp_utc_ms = int(start_datetime_est.timestamp() * 1000)
-        end_timestamp_utc_ms = int(end_datetime_est.timestamp() * 1000)
+@app.route('/')
+def index():
+    """Renders the home page with the stock ticker input form."""
+    return render_template('index.html')
 
-        # Fetch 1-minute bar data for the specified time range
-        aggs_data = polygon_client.list_aggs(
-            ticker=ticker,
-            multiplier=1,
-            timespan='minute',
-            from_=start_timestamp_utc_ms,
-            to=end_timestamp_utc_ms,
-            limit=50000  # Increased limit to get all bars for the specified range
-        )
-        aggs_list = list(aggs_data)
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    """Handles the ticker input, fetches data, and displays the results."""
+    ticker = request.form['ticker'].strip().upper()
+    if not ticker:
+        return render_template('index.html', error="Please enter a ticker symbol.")
 
-        if not aggs_list:
-            #print(f"No pre-market data available for {ticker} on {date_str}")
-            return 0.0
+    if polygon_client is None:
+        return render_template('index.html', error="Polygon API client not initialized. Check API key.")
 
-        total_premarket_volume = sum(bar.volume for bar in aggs_list)
-        return total_premarket_volume
+    print(f"Analyzing gap ups for {ticker}...")
+    gap_up_days_list = get_gap_up_day_stats(ticker, polygon_client)
 
-    except Exception as e:
-        print(f"Error fetching pre-market data for {ticker} on {date_str}: {e}")
-        return 0.0 # Return 0.0 on error
+    if not gap_up_days_list:
+        return render_template('index.html', error=f"No significant gap ups (>= 25%) found for {ticker} in the last 3 years.")
 
-def analyze_gap_ups(ticker, polygon_client):
-    """
-    Analyzes historical data for a given ticker to identify significant gap-ups
-    and includes premarket open and afterhours close prices, open, close,
-    a 'Runner' or 'Fader' label, and VWAP cross count, and intraday high/time
-    within the first 30 minutes for Faders, and volume within the first 30 minutes.
+    gap_up_results_df = pd.DataFrame(gap_up_days_list)
 
-    Args:
-        ticker (str): The stock ticker symbol.
-        polygon_client: The initialized Polygon.io RESTClient.
-    Returns:
-        pandas.DataFrame: A DataFrame containing gap-up information, premarket open,
-                          and afterhours close prices, open, close, a 'Runner'
-                          or 'Fader' label, VWAP cross count, and intraday high/time
-                          within the first 30 minutes for the ticker,
-                          volume within the first 30 minutes,
-                          or an empty DataFrame if no significant gap-ups are found
-                          or if there's an error fetching data.
-    """
-    gap_up_days_data = get_gap_up_day_stats(ticker, polygon_client)
+    # Format the percentage columns
+    for col in ['gap up % at open', 'day high %', 'closing percent']:
+        if col in gap_up_results_df.columns:
+            gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
 
-    if not gap_up_days_data:
-        return pd.DataFrame()
+    # Format volume columns in millions
+    for col in ['total volume', '30min volume', 'premarket volume']:
+        if col in gap_up_results_df.columns:
+            gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x/1_000_000:.2f}M' if pd.notna(x) and x > 0 else ('0M' if pd.notna(x) and x == 0 else ''))
 
-    processed_gap_up_days = []
-    for day_data in gap_up_days_data:
-        date_str = day_data['date']
-        #print('date_str:', date_str)
-        current_day_open = day_data['open']
-        daily_high = day_data['day high']
-        runner_fader = day_data['Runner/Fader']
+    # Store the DataFrame for potential download
+    global all_tickers_gap_up_results
+    all_tickers_gap_up_results[ticker] = gap_up_results_df
 
-        intraday_aggs_list = fetch_intraday_1_min(polygon_client, ticker, date_str)
-        #print('intraday_aggs_list:', intraday_aggs_list)
+    return render_template('results.html', ticker=ticker, results=gap_up_results_df.to_html(classes='table table-striped', index=False))
 
-        max_price_30min, max_price_30min_timestamp, high_within_30min, volume_30min = analyze_intraday_first_30_mins(intraday_aggs_list, daily_high) # Get volume_30min
+@app.route('/download/<ticker>')
+def download_excel(ticker):
+    """Provides the analysis results as an Excel file for download."""
+    if ticker in all_tickers_gap_up_results:
+        df = all_tickers_gap_up_results[ticker]
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+        df.to_excel(writer, index=False, sheet_name=f'{ticker}_GapUps')
+        writer.close()
+        output.seek(0)
+        return send_file(output, download_name=f'{ticker}_gap_up_analysis.xlsx', as_attachment=True)
+    else:
+        return "Data not found for this ticker.", 404
 
-        # Calculate percentage difference between 30-min high and open
-        percent_high_from_open_30min = None
-        if max_price_30min is not None and current_day_open is not None and current_day_open != 0:
-            percent_high_from_open_30min = ((max_price_30min - current_day_open) / current_day_open) * 100
-
-        fade_category = categorize_fade(runner_fader, high_within_30min, percent_high_from_open_30min)
-
-        day_data.update({
-            #'intraday_bars': intraday_aggs_list,
-            'intraday_high_30min': max_price_30min,
-            'intraday_high_30min_time': max_price_30min_timestamp,
-            'percent_high_from_open_30min': percent_high_from_open_30min,
-            'high_within_30min': high_within_30min,
-            '30min volume': volume_30min, # Add 30-minute volume to the dictionary
-            'fade_category': fade_category,
-
-        })
-        processed_gap_up_days.append(day_data)
-
-
-    df_gap_up = pd.DataFrame(processed_gap_up_days)
-
-
-    return df_gap_up
-
-
-def main():
-    # Get API key from environment variables
-    polygon_api_key = os.environ.get("POLYGON_API_KEY")
-    if not polygon_api_key:
-        print("POLYGON_API_KEY environment variable not set.")
-        return
-
-    polygon_client = RESTClient(polygon_api_key)
-
-    # Define the list of tickers - could also come from environment variables or a config file
-    tickers = ['WHLR', 'GRRR', 'LUCY', 'OSCR']
-
-    all_tickers_gap_up_results = {}
-
-    for ticker in tickers:
-        print(f"Analyzing gap ups for {ticker}...")
-        gap_up_results = analyze_gap_ups(ticker, polygon_client)
-
-        if not gap_up_results.empty:
-            print(f"Significant gap ups for {ticker}:")
-            # Format the percentage columns
-            gap_up_results['gap up % at open'] = gap_up_results['gap up % at open'].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
-            gap_up_results['day high %'] = gap_up_results['day high %'].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
-            gap_up_results['closing percent'] = gap_up_results['closing percent'].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
-            if 'percent_high_from_open_30min' in gap_up_results.columns:
-                 gap_up_results['percent_high_from_open_30min'] = gap_up_results['percent_high_from_open_30min'].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
-
-            # Format volume columns in millions
-            for col in ['total volume', '30min volume', 'premarket volume']:
-                if col in gap_up_results.columns:
-                    gap_up_results[col] = gap_up_results[col].apply(lambda x: f'{x/1_000_000:.2f}M' if pd.notna(x) and x > 0 else ('0M' if pd.notna(x) and x == 0 else ''))
-
-            all_tickers_gap_up_results[ticker] = gap_up_results
-            print(f"\n--- Results for {ticker} ---")
-            # In a non-notebook environment, you might print or log the DataFrame
-            print(gap_up_results.to_string()) # Use to_string() to print the whole DataFrame
-        else:
-            print(f"No significant gap ups (>= 25%) found for {ticker} in the last 3 years.")
-
-    # Implement your trading strategy based on all_tickers_gap_up_results here
-    # This part is beyond the current subtask but is where you would add trading logic.
-    print("\nAnalysis complete. Trading strategy implementation would go here.")
-
-
-if __name__ == "__main__":
-    main()
+# Note: In a production environment, you would not run app.run() directly.
+# You would use a production-ready WSGI server like Gunicorn.
+# if __name__ == '__main__':
+#     app.run(debug=True)

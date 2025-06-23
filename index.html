@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stock Gap Up Analysis Results for {{ ticker }}</title>
+    <style>
+        table, th, td {
+            border: 1px solid black;
+            border-collapse: collapse;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stock Gap Up Analysis Results for {{ ticker }}</h1>
+
+    {{ results | safe }}
+
+    <p><a href="/download/{{ ticker }}">Download Results as Excel</a></p>
+
+    <p><a href="/">Analyze another ticker</a></p>
+</body>
+</html>
