@@ -18,7 +18,16 @@
     <div class="container">
         <h1 class="mt-4 mb-4">Stock Gap Up Analysis Results</h1>
 
-        {% for ticker, results_df in results.items() %}
+        <!-- Ticker input form -->
+        <form method="POST" action="/analyze" class="mb-4">
+            <div class="form-group">
+                <label for="ticker">Enter one or more ticker symbols (comma separated):</label>
+                <input type="text" class="form-control" id="ticker" name="ticker" placeholder="e.g. AAPL, MSFT, TSLA" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Analyze</button>
+        </form>
+
+        {% for ticker, results_df in all_tickers_gap_up_results.items() %}
         <h2>Results for {{ ticker }}</h2>
         {% if not results_df.empty %}
             {{ results_df.to_html(classes='table table-striped', index=False) | safe }}
@@ -28,6 +37,10 @@
         {% endif %}
         <hr>
         {% endfor %}
+
+        {% if all_tickers_gap_up_results %}
+            <a href="/download/all" class="btn btn-info mb-3">Download All Results as Excel</a>
+        {% endif %}
 
         <p><a href="/" class="btn btn-secondary">Analyze another ticker</a></p>
     </div>

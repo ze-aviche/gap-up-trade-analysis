@@ -1,3 +1,11 @@
 pandas
 polygon-api-client
 pytz
+gunicorn # for production server
+flask
+flask_sqlalchemy # for ORM
+xlsxwriter
+# Below are data persistence in data database
+sqlalchemy #for ORM 
+psycopg2-binary # for PostgreSQL in Google Cloud
+datetime # for date and time manipulation

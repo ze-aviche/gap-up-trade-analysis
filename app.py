@@ -2,10 +2,11 @@
 from flask import Flask, request, render_template, send_file
 import pandas as pd
 import pytz
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 import os
 from polygon import RESTClient
 import io
+from flask_sqlalchemy import SQLAlchemy
 
 # Include the necessary functions directly
 def count_vwap_crosses(polygon_client, ticker, date):
@@ -505,10 +506,26 @@ def categorize_fade(runner_fader, high_within_30min, percent_high_from_open_30mi
 
 # Initialize the Flask application
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL', 'sqlite:///gap_up_analysis.db'
+) 
+db = SQLAlchemy(app)
+class GapUpResult(db.Model):
+    """
+    Model to store gap up analysis results in the database.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(16), index=True)
+    result_json = db.Column(db.Text)  # Store DataFrame as JSON string
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    # To create tables (run once in a Python shell):
+    # >>> from app import db
+    # >>> db.create_all()
+
 
 # Initialize the Polygon client (assuming POLYGON_API_KEY is already in userdata)
 try:
-    polygon_client = RESTClient(userdata.get("POLYGON_API_KEY"))
+    polygon_client = RESTClient(os.environ.get("POLYGON_API_KEY"))
 except Exception as e:
     print(f"Error initializing Polygon client: {e}")
     polygon_client = None # Handle the case where the client cannot be initialized
@@ -519,47 +536,62 @@ all_tickers_gap_up_results = {}
 @app.route('/')
 def index():
     """Renders the home page with the stock ticker input form."""
-    return render_template('index.html')
+    return render_template('index.html', all_tickers_gap_up_results={})
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
     """Handles the ticker input, fetches data, and displays the results."""
-    ticker = request.form['ticker'].strip().upper()
-    if not ticker:
-        return render_template('index.html', error="Please enter a ticker symbol.")
+    tickers_input = request.form['ticker'].strip().upper()
+    if not tickers_input:
+        return render_template('index.html', error="Please enter a ticker symbol.", all_tickers_gap_up_results={})
+
+    tickers = [t.strip() for t in tickers_input.split(',') if t.strip()]
+    if not tickers:
+        return render_template('index.html', error="Please enter at least one valid ticker.", all_tickers_gap_up_results={})
 
     if polygon_client is None:
-        return render_template('index.html', error="Polygon API client not initialized. Check API key.")
+        return render_template('index.html', error="Polygon API client not initialized. Check API key.", all_tickers_gap_up_results={})
 
-    print(f"Analyzing gap ups for {ticker}...")
-    gap_up_days_list = get_gap_up_day_stats(ticker, polygon_client)
-
-    if not gap_up_days_list:
-        return render_template('index.html', error=f"No significant gap ups (>= 25%) found for {ticker} in the last 3 years.")
-
-    gap_up_results_df = pd.DataFrame(gap_up_days_list)
-
-    # Format the percentage columns
-    for col in ['gap up % at open', 'day high %', 'closing percent']:
-        if col in gap_up_results_df.columns:
-            gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
-
-    # Format volume columns in millions
-    for col in ['total volume', '30min volume', 'premarket volume']:
-        if col in gap_up_results_df.columns:
-            gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x/1_000_000:.2f}M' if pd.notna(x) and x > 0 else ('0M' if pd.notna(x) and x == 0 else ''))
-
-    # Store the DataFrame for potential download
     global all_tickers_gap_up_results
-    all_tickers_gap_up_results[ticker] = gap_up_results_df
+    all_tickers_gap_up_results = {}
 
-    return render_template('results_multiple.html', ticker=ticker, results=gap_up_results_df.to_html(classes='table table-striped', index=False))
+    for ticker in tickers:
+        print(f"Analyzing gap ups for {ticker}...")
+        gap_up_days_list = get_gap_up_day_stats(ticker, polygon_client)
+        if not gap_up_days_list:
+            all_tickers_gap_up_results[ticker] = pd.DataFrame()  # Empty DataFrame for no results
+            continue
+
+        gap_up_results_df = pd.DataFrame(gap_up_days_list)
+        
+        #Store the results in SQLite database
+
+        result_json = gap_up_results_df.to_json(orient='records')
+        gapup = GapUpResult(ticker=ticker, result_json=result_json)
+        db.session.add(gapup)
+        db.session.commit()
+
+        # Format the percentage columns
+        for col in ['gap up % at open', 'day high %', 'closing percent']:
+            if col in gap_up_results_df.columns:
+                gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '')
+
+        # Format volume columns in millions
+        for col in ['total volume', '30min volume', 'premarket volume']:
+            if col in gap_up_results_df.columns:
+                gap_up_results_df[col] = gap_up_results_df[col].apply(lambda x: f'{x/1_000_000:.2f}M' if pd.notna(x) and x > 0 else ('0M' if pd.notna(x) and x == 0 else ''))
+
+        all_tickers_gap_up_results[ticker] = gap_up_results_df
+
+    return render_template('index.html', all_tickers_gap_up_results=all_tickers_gap_up_results)
+
 
 @app.route('/download/<ticker>')
 def download_excel(ticker):
     """Provides the analysis results as an Excel file for download."""
-    if ticker in all_tickers_gap_up_results:
-        df = all_tickers_gap_up_results[ticker]
+    gapup = GapUpResult.query.filter_by(ticker=ticker).order_by(GapUpResult.created_at.desc()).first()
+    if gapup:
+        df = pd.read_json(gapup.result_json)
         output = io.BytesIO()
         writer = pd.ExcelWriter(output, engine='xlsxwriter')
         df.to_excel(writer, index=False, sheet_name=f'{ticker}_GapUps')
@@ -569,7 +601,29 @@ def download_excel(ticker):
     else:
         return "Data not found for this ticker.", 404
 
+
+@app.route('/download/all')
+def download_all_excel():
+    gapups = GapUpResult.query.order_by(GapUpResult.ticker, GapUpResult.created_at.desc()).all()
+    if not gapups:
+        return "No data available to download.", 404
+
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    tickers_added = set()
+    for gapup in gapups:
+        if gapup.ticker not in tickers_added:
+            df = pd.read_json(gapup.result_json)
+            if not df.empty:
+                writer.sheets = {}  # Fix for xlsxwriter bug
+                df.to_excel(writer, index=False, sheet_name=gapup.ticker[:31])
+            tickers_added.add(gapup.ticker)
+    writer.close()
+    output.seek(0)
+    return send_file(output, download_name="all_gap_up_analysis.xlsx", as_attachment=True)
 # Note: In a production environment, you would not run app.run() directly.
 # You would use a production-ready WSGI server like Gunicorn.
 # if __name__ == '__main__':
+#     with app.app_context():
+#         db.create_all()
 #     app.run(debug=True)
