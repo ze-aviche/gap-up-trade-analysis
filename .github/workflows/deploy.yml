@@ -43,4 +43,5 @@ jobs:
           --image=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service \
           --region=us-east1 \
           --platform=managed \
-          --allow-unauthenticated
+          --allow-unauthenticated \
+          --set-env-vars POLYGON_API_KEY=${{ secrets.POLYGON_API_KEY }}
