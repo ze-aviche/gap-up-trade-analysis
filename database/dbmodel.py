@@ -1,7 +1,7 @@
 # models.py
 from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
-from app import db
+#from app import db
 
 db = SQLAlchemy()
 
@@ -15,7 +15,7 @@ class GapUpResult(db.Model):
 
     #To create tables (run once in a Python shell):
         
-    db.create_all()
+    #db.create_all()
 
     def __repr__(self):
         return f"<GapUpResult {self.ticker} at {self.created_at.isoformat()}>"
