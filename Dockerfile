@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 #COPY templates/ templates/
 
 # Expose the port the app runs on
-EXPOSE 5000
+EXPOSE 8080
 
 # Run the application using Gunicorn
-#CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
+#CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "120", "app:app"]
