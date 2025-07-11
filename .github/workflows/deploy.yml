@@ -2,7 +2,7 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [ main ]  # or whichever branch you use
+    branches: [ main ]  # Change this if you're using another branch
 
 jobs:
   deploy:
@@ -12,26 +12,35 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Google Cloud SDK
+    # ✅ Auth using service account JSON key
+    - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
       with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    # ✅ Set up gcloud CLI (without service_account_key)
+    - name: Set up gcloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
         project_id: ${{ secrets.GCP_PROJECT_ID }}
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        export_default_credentials: true
 
-    - name: Configure Docker
-      run: gcloud auth configure-docker us-east1-docker.pkg.dev
-
-    - name: Build and push Docker image
+    # ✅ Authorize Docker to push to Artifact Registry
+    - name: Configure Docker for Artifact Registry
       run: |
-        IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service"
+        gcloud auth configure-docker us-central1-docker.pkg.dev
+
+    # ✅ Build and push Docker image
+    - name: Build and Push Docker image
+      run: |
+        IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service"
         docker build -t $IMAGE .
         docker push $IMAGE
 
+    # ✅ Deploy to Cloud Run
     - name: Deploy to Cloud Run
       run: |
         gcloud run deploy my-service \
           --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service \
-          --region=us-east1 \
+          --region=us-central1 \
           --platform=managed \
           --allow-unauthenticated
