@@ -27,12 +27,12 @@ jobs:
     # ✅ Authorize Docker to push to Artifact Registry
     - name: Configure Docker for Artifact Registry
       run: |
-        gcloud auth configure-docker us-central1-docker.pkg.dev
+        gcloud auth configure-docker us-east1-docker.pkg.dev
 
     # ✅ Build and push Docker image
     - name: Build and Push Docker image
       run: |
-        IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service"
+        IMAGE="us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service"
         docker build -t $IMAGE .
         docker push $IMAGE
 
@@ -40,7 +40,7 @@ jobs:
     - name: Deploy to Cloud Run
       run: |
         gcloud run deploy my-service \
-          --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service \
-          --region=us-central1 \
+          --image=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/stock-analyzer-web-app/my-service \
+          --region=us-east1 \
           --platform=managed \
           --allow-unauthenticated
